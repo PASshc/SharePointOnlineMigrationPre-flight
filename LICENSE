@@ -1,0 +1,62 @@
+MIT License
+
+Copyright (c) 2025 Stanford Health Care - SharePoint Migration Project
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+THIRD-PARTY SOFTWARE
+
+This software uses only Python standard library modules and does not include
+or depend on any third-party libraries for runtime operation.
+
+Optional build dependency:
+- PyInstaller (https://www.pyinstaller.org/) - GPL license with exception for
+  bundled applications. See: https://github.com/pyinstaller/pyinstaller/blob/develop/COPYING.txt
+
+---
+
+MICROSOFT REFERENCES
+
+This software implements validation rules based on publicly documented
+Microsoft SharePoint Online and OneDrive limitations. References to Microsoft
+documentation are for informational purposes only.
+
+Microsoft product names mentioned in documentation are trademarks or registered
+trademarks of Microsoft Corporation.
+
+- SharePoint® is a registered trademark of Microsoft Corporation
+- OneDrive® is a registered trademark of Microsoft Corporation
+- Microsoft 365® is a registered trademark of Microsoft Corporation
+- Windows® is a registered trademark of Microsoft Corporation
+
+This software is not affiliated with, endorsed by, or sponsored by Microsoft Corporation.
+
+---
+
+DISCLAIMER
+
+This tool is provided as-is for migration planning purposes. Always verify
+results and test thoroughly before making migration decisions. The authors
+and contributors assume no responsibility for data loss, migration failures,
+or other issues arising from the use of this software.
+
+Consult with your IT department and Microsoft documentation for the most
+current SharePoint Online limitations and migration best practices.

@@ -1,0 +1,9 @@
+# SharePoint Online Migration Preflight Scanner
+# 
+# This tool uses only Python standard library modules.
+# No external dependencies are required for basic operation.
+#
+# Optional: For building standalone EXE
+# pyinstaller>=5.0.0
+#
+# Python version requirement: >=3.10
