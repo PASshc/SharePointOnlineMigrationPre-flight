@@ -33,7 +33,33 @@ A production-ready Python utility that recursively scans local or UNC paths to i
 - **Python 3.10+** (Windows 10/11)
 - No external dependencies required (uses only Python standard library)
 
-### Basic Usage
+### Three Ways to Run the Scanner
+
+#### 🖱️ Option 1: GUI Interface (Easiest)
+
+**Double-click** `run_gui.bat` to launch the graphical interface.
+
+The GUI provides:
+- Easy form-based configuration
+- Real-time URL validation
+- Browse button for folder selection
+- Live scan progress
+- Auto-open report when complete
+
+**Create Desktop Shortcut:**
+Double-click `create_desktop_shortcut.vbs` to add "SPO Scanner" icon to your desktop.
+
+#### 💬 Option 2: Interactive Wizard
+
+**Double-click** `run_scan.bat` to launch the command-line wizard.
+
+The wizard will guide you through:
+1. Selecting destination type (SharePoint/Teams/OneDrive)
+2. Entering SharePoint URL
+3. Entering document library name
+4. Selecting folder to scan
+
+#### ⌨️ Option 3: Command Line (Advanced)
 
 Open **PowerShell** and run:
 
