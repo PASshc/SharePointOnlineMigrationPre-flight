@@ -26,22 +26,6 @@ echo Python detected:
 python --version
 echo.
 
-REM Prompt for scan path
-set /p SCAN_PATH="Enter the path to scan (or drag folder here): "
-
-REM Remove quotes if present (from drag-and-drop) and trim spaces
-set "SCAN_PATH=!SCAN_PATH:"=!"
-for /f "tokens=* delims= " %%a in ("!SCAN_PATH!") do set "SCAN_PATH=%%a"
-for /l %%a in (1,1,100) do if "!SCAN_PATH:~-1!"==" " set "SCAN_PATH=!SCAN_PATH:~0,-1!"
-
-REM Validate path
-if not exist "!SCAN_PATH!" (
-    echo.
-    echo ERROR: Path does not exist: !SCAN_PATH!
-    pause
-    exit /b 2
-)
-
 REM Set default output paths (Desktop - try OneDrive location first, fallback to standard)
 if exist "%USERPROFILE%\OneDrive\Desktop" (
     set "OUTPUT_DIR=%USERPROFILE%\OneDrive\Desktop"
@@ -53,18 +37,15 @@ set "TIMESTAMP=!TIMESTAMP: =0!"
 set "REPORT_PATH=!OUTPUT_DIR!\SPOMigrationReport_!TIMESTAMP!.csv"
 set "LOG_PATH=!OUTPUT_DIR!\SPOMigrationLog_!TIMESTAMP!.txt"
 
+echo Report will be saved to: !REPORT_PATH!
+echo Log will be saved to:    !LOG_PATH!
 echo.
-echo Configuration:
-echo   Scan Path:  !SCAN_PATH!
-echo   Report:     !REPORT_PATH!
-echo   Log:        !LOG_PATH!
-echo.
-echo Starting scan...
+echo Starting interactive wizard...
 echo ================================================================================
 echo.
 
-REM Run the scanner
-python "%~dp0spo_preflight.py" "!SCAN_PATH!" --report "!REPORT_PATH!" --log "!LOG_PATH!"
+REM Run the scanner in interactive mode
+python "%~dp0spo_preflight.py" --interactive --report "!REPORT_PATH!" --log "!LOG_PATH!"
 
 set "EXIT_CODE=!ERRORLEVEL!"
 

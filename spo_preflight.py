@@ -23,6 +23,7 @@ import hashlib
 import secrets
 import time
 import random
+from urllib.parse import quote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:
@@ -32,7 +33,7 @@ except ImportError:
     TQDM_AVAILABLE = False
 
 # Default Microsoft limits and thresholds
-DEFAULT_MAX_PATH_LENGTH = 400
+DEFAULT_MAX_site_url_count = 400
 DEFAULT_MAX_FILENAME_LENGTH = 255
 DEFAULT_MAX_FILE_SIZE_GB = 250
 DEFAULT_MAX_FOLDER_DEPTH = 20
@@ -134,6 +135,236 @@ def anonymize_path(path: str, salt: str) -> str:
     return os.sep.join(hashed_parts)
 
 
+def validate_sharepoint_url(url: str, is_onedrive: bool) -> Tuple[bool, str]:
+    """
+    Validate SharePoint or OneDrive URL format.
+    
+    Args:
+        url: The tenant URL to validate
+        is_onedrive: True if validating OneDrive URL, False for SharePoint
+    
+    Returns:
+        Tuple of (is_valid: bool, message: str)
+    """
+    # Must start with https://
+    if not url.startswith('https://'):
+        return False, "URL must start with 'https://'"
+    
+    # Must contain .sharepoint.com
+    if '.sharepoint.com' not in url.lower():
+        return False, "URL must contain '.sharepoint.com'"
+    
+    # OneDrive: Must contain "-my.sharepoint.com"
+    if is_onedrive:
+        if '-my.sharepoint.com' not in url.lower():
+            return False, "OneDrive URL must contain '-my.sharepoint.com' (e.g., https://contoso-my.sharepoint.com)"
+    else:
+        # SharePoint: Must NOT contain "-my"
+        if '-my.sharepoint.com' in url.lower():
+            return False, "This is a OneDrive URL. Please select OneDrive destination type instead."
+        
+        # SharePoint: Must include /sites/ or /teams/ path (not root site)
+        if '/sites/' not in url.lower() and '/teams/' not in url.lower():
+            return False, "SharePoint URL must include '/sites/<name>' or '/teams/<name>' path (e.g., https://contoso.sharepoint.com/sites/Team)"
+    
+    # Remove trailing slashes
+    url = url.rstrip('/')
+    
+    # Basic URL format validation
+    pattern = r'^https://[a-zA-Z0-9][-a-zA-Z0-9]*\.sharepoint\.com(/.*)?$'
+    if not re.match(pattern, url):
+        return False, "Invalid URL format. Expected: https://<tenant>.sharepoint.com/sites/<name> or https://<tenant>-my.sharepoint.com"
+    
+    return True, "Valid"
+
+
+def interactive_setup() -> Tuple[str, str, str, bool]:
+    """
+    Interactive wizard to collect SharePoint migration details.
+    
+    Returns:
+        Tuple of (scan_path, spo_url, library_name, is_onedrive)
+    """
+    print("\n" + "=" * 70)
+    print("SharePoint Online Migration Preflight Scanner")
+    print("Interactive Setup Wizard")
+    print("=" * 70)
+    
+    # Step 1: Destination type
+    print("\n[Step 1 of 4] Select Migration Destination Type")
+    print("-" * 70)
+    while True:
+        print("\nWhere will the content be migrated to?")
+        print("  1 - SharePoint Online Document Library (/sites/)")
+        print("  2 - Microsoft Teams Channel (/teams/)")
+        print("  3 - OneDrive for Business")
+        print("  Q - Quit")
+        
+        choice = input("\nEnter your choice [1/2/3/Q]: ").strip().upper()
+        
+        if choice == 'Q':
+            print("\nSetup cancelled by user.")
+            sys.exit(0)
+        elif choice in ['1', '2', '3']:
+            is_onedrive = (choice == '3')
+            is_teams = (choice == '2')
+            if is_onedrive:
+                dest_type = "OneDrive for Business"
+            elif is_teams:
+                dest_type = "Microsoft Teams Channel"
+            else:
+                dest_type = "SharePoint Online Document Library"
+            print(f"\n✓ Selected: {dest_type}")
+            break
+        else:
+            print("❌ Invalid choice. Please enter 1, 2, 3, or Q.")
+    
+    # Step 2: Tenant URL
+    print("\n[Step 2 of 4] Enter SharePoint Site URL")
+    print("-" * 70)
+    if is_onedrive:
+        print("\nOneDrive URL format: https://<tenant>-my.sharepoint.com")
+        print("Example: https://contoso-my.sharepoint.com")
+    elif is_teams:
+        print("\n⚠️  IMPORTANT: Include the full Teams site path (/teams/<name>)")
+        print("\nMicrosoft Teams URL format:")
+        print("  • https://<tenant>.sharepoint.com/teams/<teamname>")
+        print("\nExamples:")
+        print("  ✓ https://stanfordhealthcare.sharepoint.com/teams/Marketing")
+        print("  ✓ https://stanfordhealthcare.sharepoint.com/teams/ProjectAlpha")
+        print("  ✗ https://stanfordhealthcare.sharepoint.com (missing /teams/)")
+        print("\nTip: In Teams, go to Files tab → 'Open in SharePoint' to see the URL")
+    else:
+        print("\n⚠️  IMPORTANT: Include the full site path (/sites/<name>)")
+        print("\nSharePoint Document Library URL format:")
+        print("  • https://<tenant>.sharepoint.com/sites/<sitename>")
+        print("\nExamples:")
+        print("  ✓ https://stanfordhealthcare.sharepoint.com/sites/TestTeam1")
+        print("  ✓ https://stanfordhealthcare.sharepoint.com/sites/ProjectDocs")
+        print("  ✗ https://stanfordhealthcare.sharepoint.com (missing /sites/)")
+    
+    while True:
+        url = input("\nEnter tenant URL: ").strip()
+        
+        if not url:
+            print("❌ URL cannot be empty.")
+            continue
+        
+        is_valid, message = validate_sharepoint_url(url, is_onedrive)
+        
+        if is_valid:
+            # Remove trailing slash
+            url = url.rstrip('/')
+            print(f"✓ Valid URL: {url}")
+            break
+        else:
+            print(f"❌ {message}")
+            print("Please try again.")
+    
+    # Step 3: Document Library name (skip for OneDrive)
+    if is_onedrive:
+        library_name = "Documents"
+        print(f"\n[Step 3 of 4] Document Library")
+        print("-" * 70)
+        print(f"✓ Using default OneDrive library: '{library_name}'")
+    elif is_teams:
+        print("\n[Step 3 of 4] Enter Teams Channel Name")
+        print("-" * 70)
+        print("\nMicrosoft Teams channels become folders in the 'Documents' library.")
+        print("\nCommon channel names:")
+        print("  • 'General' (default channel - most common)")
+        print("  • 'Marketing' (custom channel)")
+        print("  • 'Projects' (custom channel)")
+        print("\nTip: Check your Teams Files tab to see available channels.")
+        
+        while True:
+            library_name = input("\nEnter channel name (or press Enter for 'General'): ").strip()
+            
+            if not library_name:
+                library_name = "General"
+            
+            print(f"✓ Teams Channel: {library_name}")
+            break
+    else:
+        print("\n[Step 3 of 4] Enter Document Library Name")
+        print("-" * 70)
+        print("\nCommon library names:")
+        print("  • 'Shared Documents' (default - most common)")
+        print("  • 'Documents' (alternate default)")
+        print("  • 'ProjectFiles' (custom library)")
+        
+        while True:
+            library_name = input("\nEnter library name (or press Enter for 'Shared Documents'): ").strip()
+            
+            if not library_name:
+                library_name = "Shared Documents"
+            
+            print(f"✓ Document Library: {library_name}")
+            break
+    
+    # Step 4: Local scan path
+    print("\n[Step 4 of 4] Enter Local Folder Path to Scan")
+    print("-" * 70)
+    print("\nExamples:")
+    print("  • C:\\Data\\ProjectFiles")
+    print("  • \\\\server\\share\\folder")
+    
+    while True:
+        scan_path = input("\nEnter path to scan: ").strip().strip('"')
+        
+        if not scan_path:
+            print("❌ Path cannot be empty.")
+            continue
+        
+        if not os.path.exists(scan_path):
+            print(f"❌ Path does not exist: {scan_path}")
+            retry = input("Try again? [Y/n]: ").strip().lower()
+            if retry == 'n':
+                print("\nSetup cancelled by user.")
+                sys.exit(0)
+            continue
+        
+        if not os.path.isdir(scan_path):
+            print(f"❌ Path is not a directory: {scan_path}")
+            continue
+        
+        print(f"✓ Scan path: {scan_path}")
+        break
+    
+    # Summary and overhead calculation
+    print("\n" + "=" * 70)
+    print("Configuration Summary")
+    print("=" * 70)
+    print(f"Destination Type:  {dest_type}")
+    print(f"Tenant URL:        {url}")
+    print(f"Document Library:  {library_name}")
+    print(f"Local Scan Path:   {scan_path}")
+    
+    # Calculate SharePoint URL overhead
+    library_encoded = quote(library_name)
+    if is_onedrive:
+        spo_base = f"{url}/{library_encoded}/"
+    else:
+        spo_base = f"{url}/{library_encoded}/"
+    
+    overhead = len(spo_base)
+    effective_limit = 400 - overhead
+    
+    print(f"\nSharePoint URL Base:    {spo_base}")
+    print(f"URL Overhead:           {overhead} characters")
+    print(f"Effective Path Limit:   {effective_limit} characters")
+    print(f"  (400 character limit - {overhead} overhead = {effective_limit} remaining)")
+    
+    print("\n" + "=" * 70)
+    proceed = input("\nProceed with scan? [Y/n]: ").strip().lower()
+    
+    if proceed == 'n':
+        print("\nScan cancelled by user.")
+        sys.exit(0)
+    
+    return scan_path, url, library_name, is_onedrive
+
+
 class StreamedCSVWriter:
     """Write CSV rows as issues are found (memory efficient)."""
     
@@ -172,7 +403,8 @@ class PreflightScanner:
     
     def __init__(
         self,
-        max_path: int = DEFAULT_MAX_PATH_LENGTH,
+        scan_root: str,
+        max_path: int = DEFAULT_MAX_site_url_count,
         max_filename: int = DEFAULT_MAX_FILENAME_LENGTH,
         max_file_size_gb: int = DEFAULT_MAX_FILE_SIZE_GB,
         max_depth: int = DEFAULT_MAX_FOLDER_DEPTH,
@@ -183,8 +415,13 @@ class PreflightScanner:
         workers: int = 1,
         anonymize: bool = False,
         progress: bool = False,
-        stream_csv: bool = True
+        stream_csv: bool = True,
+        spo_url: Optional[str] = None,
+        spo_library: Optional[str] = None,
+        is_onedrive: bool = False,
+        spo_overhead: int = 80
     ):
+        self.scan_root = os.path.normpath(scan_root)
         self.max_path = max_path
         self.max_filename = max_filename
         self.max_file_size_bytes = max_file_size_gb * 1024 * 1024 * 1024
@@ -204,6 +441,22 @@ class PreflightScanner:
         self.issue_count = 0
         self.logger = logging.getLogger(__name__)
         self.csv_writer = None
+        
+        # SharePoint URL configuration
+        self.spo_url = spo_url
+        self.spo_library = spo_library
+        self.is_onedrive = is_onedrive
+        
+        # Calculate SharePoint URL base and overhead
+        if spo_url and spo_library:
+            library_encoded = quote(spo_library)
+            self.spo_base = f"{spo_url.rstrip('/')}/{library_encoded}/"
+            self.url_overhead = len(self.spo_base)
+            self.effective_path_limit = 400 - self.url_overhead
+        else:
+            self.spo_base = None
+            self.url_overhead = spo_overhead
+            self.effective_path_limit = 400 - spo_overhead
         
         if anonymize:
             self.logger.info(f"Anonymization enabled. Salt: {self.anon_salt} (save to de-anonymize)")
@@ -290,8 +543,30 @@ class PreflightScanner:
         item_name = os.path.basename(full_path)
         item_type = 'File' if is_file else 'Folder'
         
-        # Decoded path length (as Unicode string)
-        path_length = len(full_path)
+        # Calculate local Windows path length
+        character_count_path = len(full_path)
+        
+        # Calculate SharePoint URL length if configured
+        if self.spo_base:
+            # Get relative path from scan root
+            try:
+                rel_path = os.path.relpath(full_path, self.scan_root)
+                # Convert Windows path separators to URL format
+                rel_path_url = rel_path.replace('\\', '/')
+                # URL-encode the path components
+                path_parts = [quote(part) for part in rel_path_url.split('/')]
+                rel_path_encoded = '/'.join(path_parts)
+                # Build full SharePoint URL
+                sharepoint_url = self.spo_base + rel_path_encoded
+                site_url_count = len(sharepoint_url)
+            except (ValueError, Exception) as e:
+                self.logger.warning(f"Could not compute SharePoint URL for {full_path}: {e}")
+                site_url_count = len(full_path)
+                sharepoint_url = None
+        else:
+            # Fall back to local path length
+            site_url_count = len(full_path)
+            sharepoint_url = None
         
         # Compute depth
         depth = self.compute_depth(full_path, root_path)
@@ -317,21 +592,26 @@ class PreflightScanner:
                 'CurrentValue': item_name,
                 'SuggestedFix': f'{item_name}_file' if is_file else f'{item_name}_folder',
                 'CharacterCount': len(item_name),
-                'CharacterCountPath': path_length,
+                'CharacterCountPath': character_count_path,
+                'SharePointURL': sharepoint_url or 'N/A',
+                'SiteURLCount': site_url_count,
                 'FileSizeMB': f'{file_size_mb:.2f}' if is_file else '',
                 'FolderDepth': depth
             })
         
-        # Check 1: Path length
-        if path_length > self.max_path:
+        # Check 1: Path length (using SharePoint URL if available)
+        if site_url_count > self.max_path:
+            issue_detail = f'SharePoint URL: {site_url_count} chars' if sharepoint_url else f'{site_url_count} chars'
             issues.append({
                 'ItemType': item_type,
                 'FullPath': full_path,
                 'IssueType': 'Path too long',
-                'CurrentValue': str(path_length),
-                'SuggestedFix': f'Shorten to ≤{self.max_path} chars',
+                'CurrentValue': issue_detail,
+                'SuggestedFix': f'Shorten to ≤{self.max_path} chars (current: {site_url_count}, limit: {self.max_path})',
                 'CharacterCount': len(item_name),
-                'CharacterCountPath': path_length,
+                'CharacterCountPath': character_count_path,
+                'SharePointURL': sharepoint_url or 'N/A',
+                'SiteURLCount': site_url_count,
                 'FileSizeMB': f'{file_size_mb:.2f}' if is_file else '',
                 'FolderDepth': depth
             })
@@ -345,7 +625,9 @@ class PreflightScanner:
                 'CurrentValue': item_name,
                 'SuggestedFix': self.suggest_fix(item_name),
                 'CharacterCount': len(item_name),
-                'CharacterCountPath': path_length,
+                'CharacterCountPath': character_count_path,
+                'SharePointURL': sharepoint_url or 'N/A',
+                'SiteURLCount': site_url_count,
                 'FileSizeMB': f'{file_size_mb:.2f}' if is_file else '',
                 'FolderDepth': depth
             })
@@ -360,7 +642,9 @@ class PreflightScanner:
                 'CurrentValue': f"{item_name} (chars: {', '.join(set(invalid_found))})",
                 'SuggestedFix': self.suggest_fix(item_name),
                 'CharacterCount': len(item_name),
-                'CharacterCountPath': path_length,
+                'CharacterCountPath': character_count_path,
+                'SharePointURL': sharepoint_url or 'N/A',
+                'SiteURLCount': site_url_count,
                 'FileSizeMB': f'{file_size_mb:.2f}' if is_file else '',
                 'FolderDepth': depth
             })
@@ -375,7 +659,9 @@ class PreflightScanner:
                 'CurrentValue': item_name,
                 'SuggestedFix': self.suggest_fix(item_name),
                 'CharacterCount': len(item_name),
-                'CharacterCountPath': path_length,
+                'CharacterCountPath': character_count_path,
+                'SharePointURL': sharepoint_url or 'N/A',
+                'SiteURLCount': site_url_count,
                 'FileSizeMB': f'{file_size_mb:.2f}' if is_file else '',
                 'FolderDepth': depth
             })
@@ -391,7 +677,9 @@ class PreflightScanner:
                     'CurrentValue': ext,
                     'SuggestedFix': 'Remove or rename file',
                     'CharacterCount': len(item_name),
-                    'CharacterCountPath': path_length,
+                'CharacterCountPath': character_count_path,
+                    'SharePointURL': sharepoint_url or 'N/A',
+                    'SiteURLCount': site_url_count,
                     'FileSizeMB': f'{file_size_mb:.2f}',
                     'FolderDepth': depth
                 })
@@ -405,7 +693,9 @@ class PreflightScanner:
                 'CurrentValue': f'{file_size_mb:.2f} MB',
                 'SuggestedFix': f'Split or reduce to ≤{self.max_file_size_bytes / (1024**3):.0f} GB',
                 'CharacterCount': len(item_name),
-                'CharacterCountPath': path_length,
+                'CharacterCountPath': character_count_path,
+                'SharePointURL': sharepoint_url or 'N/A',
+                'SiteURLCount': site_url_count,
                 'FileSizeMB': f'{file_size_mb:.2f}',
                 'FolderDepth': depth
             })
@@ -419,7 +709,9 @@ class PreflightScanner:
                 'CurrentValue': str(depth),
                 'SuggestedFix': f'Flatten hierarchy to ≤{self.max_depth} levels',
                 'CharacterCount': len(item_name),
-                'CharacterCountPath': path_length,
+                'CharacterCountPath': character_count_path,
+                'SharePointURL': sharepoint_url or 'N/A',
+                'SiteURLCount': site_url_count,
                 'FileSizeMB': f'{file_size_mb:.2f}' if is_file else '',
                 'FolderDepth': depth
             })
@@ -487,6 +779,24 @@ class PreflightScanner:
                         if colliding_names:
                             depth = self.compute_depth(full_path, original_root)
                             file_size_mb = 0.0
+                            
+                            # Calculate SharePoint URL and path length for collision issue
+                            site_url_count = len(full_path)
+                            if self.spo_base:
+                                try:
+                                    rel_path = os.path.relpath(full_path, self.scan_root)
+                                    rel_path_url = rel_path.replace('\\', '/')
+                                    path_parts = [quote(part) for part in rel_path_url.split('/')]
+                                    rel_path_encoded = '/'.join(path_parts)
+                                    sharepoint_url = self.spo_base + rel_path_encoded
+                                    site_url_count = len(sharepoint_url)
+                                except:
+                                    site_url_count = site_url_count
+                                    sharepoint_url = None
+                            else:
+                                site_url_count = site_url_count
+                                sharepoint_url = None
+                            
                             if is_file:
                                 try:
                                     file_size_bytes = retry_with_backoff(os.path.getsize, full_path)
@@ -501,7 +811,8 @@ class PreflightScanner:
                                 'CurrentValue': f'{entry.name} (collides with: {", ".join(colliding_names)})',
                                 'SuggestedFix': f'Rename to make unique: {entry.name}_1, {entry.name}_2, etc.',
                                 'CharacterCount': len(entry.name),
-                                'CharacterCountPath': len(full_path),
+                                'SharePointURL': sharepoint_url or 'N/A',
+                                'SiteURLCount': site_url_count,
                                 'FileSizeMB': f'{file_size_mb:.2f}' if is_file else '',
                                 'FolderDepth': depth
                             })
@@ -548,6 +859,8 @@ def write_csv_report(issues: List[dict], output_path: str, logger: logging.Logge
         'SuggestedFix',
         'CharacterCount',
         'CharacterCountPath',
+        'SiteURLCount',
+        'SharePointURL',
         'FileSizeMB',
         'FolderDepth'
     ]
@@ -614,8 +927,17 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Scan a UNC path
+  # Interactive mode (recommended)
+  python spo_preflight.py --interactive
+  
+  # Scan a UNC path (legacy mode)
   python spo_preflight.py "\\\\server\\share\\folder"
+  
+  # CLI mode with SharePoint URL
+  python spo_preflight.py "C:\\Data" --spo-url "https://contoso.sharepoint.com/sites/Team" --spo-library "Shared Documents"
+  
+  # CLI mode with OneDrive URL
+  python spo_preflight.py "C:\\Data" --spo-url "https://contoso-my.sharepoint.com" --onedrive
   
   # Scan with custom output paths
   python spo_preflight.py "C:\\Data" --report "C:\\Reports\\issues.csv" --log "C:\\Reports\\scan.log"
@@ -630,7 +952,37 @@ Examples:
     
     parser.add_argument(
         'scan_path',
-        help='Root path to scan (local drive or UNC path)'
+        nargs='?',
+        help='Root path to scan (local drive or UNC path). Optional if using --interactive.'
+    )
+    
+    parser.add_argument(
+        '--interactive', '-i',
+        action='store_true',
+        help='Run interactive wizard to configure SharePoint destination'
+    )
+    
+    parser.add_argument(
+        '--spo-url',
+        help='SharePoint tenant URL (e.g., https://contoso.sharepoint.com/sites/Team or https://contoso-my.sharepoint.com)'
+    )
+    
+    parser.add_argument(
+        '--spo-library',
+        help='Document library or Teams channel name (e.g., "Shared Documents" or "General")'
+    )
+    
+    parser.add_argument(
+        '--onedrive',
+        action='store_true',
+        help='Flag to indicate OneDrive for Business destination (auto-sets library to "Documents")'
+    )
+    
+    parser.add_argument(
+        '--spo-overhead',
+        type=int,
+        default=80,
+        help='Estimated SharePoint URL overhead in characters (default: 80, used only if --spo-url not provided)'
     )
     
     parser.add_argument(
@@ -648,8 +1000,8 @@ Examples:
     parser.add_argument(
         '--max-path',
         type=int,
-        default=DEFAULT_MAX_PATH_LENGTH,
-        help=f'Maximum path length (default: {DEFAULT_MAX_PATH_LENGTH})'
+        default=DEFAULT_MAX_site_url_count,
+        help=f'Maximum path length (default: {DEFAULT_MAX_site_url_count})'
     )
     
     parser.add_argument(
@@ -741,13 +1093,60 @@ def main():
     """
     args = parse_args()
     
+    # Handle interactive mode
+    if args.interactive:
+        scan_path, spo_url, spo_library, is_onedrive = interactive_setup()
+        # Override args with wizard results
+        args.scan_path = scan_path
+        args.spo_url = spo_url
+        args.spo_library = spo_library
+        args.onedrive = is_onedrive
+    else:
+        # Validate required parameters in CLI mode
+        if not args.scan_path:
+            print("ERROR: scan_path is required when not using --interactive mode")
+            print("Run with --interactive flag for guided setup, or provide scan_path as first argument")
+            sys.exit(1)
+        
+        # Auto-set library for OneDrive
+        if args.onedrive and not args.spo_library:
+            args.spo_library = "Documents"
+        
+        # Validate SharePoint URL if provided
+        if args.spo_url:
+            is_valid, message = validate_sharepoint_url(args.spo_url, args.onedrive)
+            if not is_valid:
+                print(f"ERROR: Invalid SharePoint URL - {message}")
+                sys.exit(1)
+    
     # Setup logging
     logger = setup_logging(args.log)
     
     logger.info("=" * 70)
-    logger.info("SharePoint Online Migration Preflight Scanner v2.0.0")
+    logger.info("SharePoint Online Migration Preflight Scanner v2.1.0")
     logger.info("=" * 70)
     logger.info(f"Scan path: {args.scan_path}")
+    
+    # Display SharePoint destination info
+    if args.spo_url:
+        dest_type = "OneDrive for Business" if args.onedrive else "SharePoint Online Document Library"
+        logger.info(f"Destination: {dest_type}")
+        logger.info(f"SharePoint URL: {args.spo_url}")
+        logger.info(f"Document Library: {args.spo_library}")
+        
+        # Calculate overhead
+        library_encoded = quote(args.spo_library)
+        spo_base = f"{args.spo_url.rstrip('/')}/{library_encoded}/"
+        overhead = len(spo_base)
+        effective_limit = 400 - overhead
+        
+        logger.info(f"SharePoint URL Base: {spo_base}")
+        logger.info(f"URL Overhead: {overhead} characters")
+        logger.info(f"Effective Path Limit: {effective_limit} characters (400 - {overhead} overhead)")
+    else:
+        logger.info(f"SharePoint URL: Not configured (using estimated overhead of {args.spo_overhead} chars)")
+        logger.info(f"Effective Path Limit: ~{400 - args.spo_overhead} characters")
+    
     logger.info(f"Report output: {args.report}")
     logger.info(f"Log output: {args.log}")
     logger.info(f"Max path length: {args.max_path}")
@@ -773,8 +1172,9 @@ def main():
         logger.error(f"Scan path is not a directory: {args.scan_path}")
         sys.exit(2)
     
-    # Initialize scanner
+    # Initialize scanner with SharePoint URL parameters
     scanner = PreflightScanner(
+        scan_root=args.scan_path,
         max_path=args.max_path,
         max_filename=args.max_filename,
         max_file_size_gb=args.max_file_size_gb,
@@ -786,7 +1186,11 @@ def main():
         workers=args.workers,
         anonymize=args.anonymize,
         progress=args.progress,
-        stream_csv=True
+        stream_csv=True,
+        spo_url=args.spo_url,
+        spo_library=args.spo_library,
+        is_onedrive=args.onedrive,
+        spo_overhead=args.spo_overhead
     )
     
     # Start scan
@@ -796,7 +1200,8 @@ def main():
     # Use streamed CSV writing
     fieldnames = [
         'ItemType', 'FullPath', 'IssueType', 'CurrentValue', 'SuggestedFix',
-        'CharacterCount', 'CharacterCountPath', 'FileSizeMB', 'FolderDepth'
+        'CharacterCount', 'CharacterCountPath', 'SiteURLCount', 'SharePointURL',
+        'FileSizeMB', 'FolderDepth'
     ]
     
     anonymize_fn = None
@@ -843,6 +1248,9 @@ def main():
         summary = {
             'scan_timestamp': start_time.isoformat(),
             'scan_path': args.scan_path,
+            'sharepoint_url': args.spo_url,
+            'document_library': args.spo_library,
+            'is_onedrive': args.onedrive,
             'total_items_scanned': scanner.scan_count,
             'total_issues': scanner.issue_count,
             'issues_by_type': issue_counts,
