@@ -11,6 +11,14 @@ License: MIT
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
+
+# Try to import PIL for logo support (optional)
+try:
+    from PIL import Image, ImageTk
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+
 import os
 import sys
 import json
@@ -27,7 +35,7 @@ CONFIG_FILE = "scanner_config.json"
 class ScannerGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("SharePoint Migration Preflight Scanner v2.1.0")
+        self.root.title("SharePoint Migration Preflight Scanner v2.1.1")
         self.root.geometry("720x650")
         self.root.resizable(True, True)
         self.root.minsize(720, 500)
@@ -84,13 +92,30 @@ class ScannerGUI:
         main_frame = ttk.Frame(scrollable_frame, padding="20")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
+        # Logo (only if PIL is available)
+        if PIL_AVAILABLE:
+            try:
+                logo_path = Path(__file__).parent / "images" / "Designer.png"
+                if logo_path.exists():
+                    # Load and resize the logo
+                    logo_image = Image.open(logo_path)
+                    # Resize to a reasonable size (e.g., 120x120)
+                    logo_image = logo_image.resize((120, 120), Image.Resampling.LANCZOS)
+                    self.logo_photo = ImageTk.PhotoImage(logo_image)
+                    
+                    logo_label = ttk.Label(main_frame, image=self.logo_photo)
+                    logo_label.grid(row=0, column=0, columnspan=3, pady=(0, 10))
+            except Exception as e:
+                # If logo fails to load, just skip it
+                pass
+        
         # Title
         title_label = ttk.Label(
             main_frame, 
             text="SharePoint Migration Preflight Scanner",
             font=("Segoe UI", 16, "bold")
         )
-        title_label.grid(row=0, column=0, columnspan=3, pady=(0, 5))
+        title_label.grid(row=1, column=0, columnspan=3, pady=(0, 5))
         
         subtitle_label = ttk.Label(
             main_frame,
@@ -98,24 +123,60 @@ class ScannerGUI:
             font=("Segoe UI", 9),
             foreground="gray"
         )
-        subtitle_label.grid(row=1, column=0, columnspan=3, pady=(0, 20))
+        subtitle_label.grid(row=2, column=0, columnspan=3, pady=(0, 20))
         
         # Separator
         ttk.Separator(main_frame, orient='horizontal').grid(
-            row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 20)
+            row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 20)
         )
         
-        # === SECTION 1: Destination Type ===
-        row = 3
-        section_label = ttk.Label(main_frame, text="1. Select Destination Type", font=("Segoe UI", 10, "bold"))
+        # === SECTION 1: Scan Mode (FIRST - determines what fields are shown) ===
+        row = 4
+        section_label = ttk.Label(main_frame, text="1. Select Scan Mode", font=("Segoe UI", 10, "bold"))
         section_label.grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=(0, 10))
         
         row += 1
-        dest_frame = ttk.Frame(main_frame)
-        dest_frame.grid(row=row, column=0, columnspan=3, sticky=tk.W, padx=(20, 0), pady=(0, 15))
+        mode_frame = ttk.Frame(main_frame)
+        mode_frame.grid(row=row, column=0, columnspan=3, sticky=tk.W, padx=(20, 0), pady=(0, 5))
+        
+        self.inventory_mode = tk.BooleanVar(value=False)
         
         ttk.Radiobutton(
-            dest_frame,
+            mode_frame,
+            text="Pre-Flight Check (Scan for SharePoint migration issues)",
+            variable=self.inventory_mode,
+            value=False,
+            command=self.on_scan_mode_change
+        ).grid(row=0, column=0, sticky=tk.W, pady=2)
+        
+        ttk.Radiobutton(
+            mode_frame,
+            text="Inventory Only (Create complete file/folder list with counts)",
+            variable=self.inventory_mode,
+            value=True,
+            command=self.on_scan_mode_change
+        ).grid(row=1, column=0, sticky=tk.W, pady=2)
+        
+        row += 1
+        self.mode_help_label = ttk.Label(
+            main_frame,
+            text="Pre-Flight: Validates files against SharePoint limits and naming rules • Inventory: Lists all files/folders for pre/post migration comparison",
+            font=("Segoe UI", 8),
+            foreground="gray"
+        )
+        self.mode_help_label.grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=(0, 15))
+        
+        # === SECTION 2: Destination Type (Hidden in Inventory mode) ===
+        row += 1
+        self.dest_section_label = ttk.Label(main_frame, text="2. Select Destination Type", font=("Segoe UI", 10, "bold"))
+        self.dest_section_label.grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=(0, 10))
+        
+        row += 1
+        self.dest_frame = ttk.Frame(main_frame)
+        self.dest_frame.grid(row=row, column=0, columnspan=3, sticky=tk.W, padx=(20, 0), pady=(0, 15))
+        
+        ttk.Radiobutton(
+            self.dest_frame,
             text="SharePoint Online Document Library (/sites/)",
             variable=self.dest_type,
             value="sharepoint",
@@ -123,7 +184,7 @@ class ScannerGUI:
         ).grid(row=0, column=0, sticky=tk.W, pady=2)
         
         ttk.Radiobutton(
-            dest_frame,
+            self.dest_frame,
             text="Microsoft Teams Channel (/teams/)",
             variable=self.dest_type,
             value="teams",
@@ -131,17 +192,17 @@ class ScannerGUI:
         ).grid(row=1, column=0, sticky=tk.W, pady=2)
         
         ttk.Radiobutton(
-            dest_frame,
+            self.dest_frame,
             text="OneDrive for Business",
             variable=self.dest_type,
             value="onedrive",
             command=self.on_dest_type_change
         ).grid(row=2, column=0, sticky=tk.W, pady=2)
         
-        # === SECTION 2: SharePoint URL ===
+        # === SECTION 3: SharePoint URL (Hidden in Inventory mode) ===
         row += 1
-        section_label = ttk.Label(main_frame, text="2. SharePoint Site URL", font=("Segoe UI", 10, "bold"))
-        section_label.grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=(10, 5))
+        self.url_section_label = ttk.Label(main_frame, text="3. SharePoint Site URL", font=("Segoe UI", 10, "bold"))
+        self.url_section_label.grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=(10, 5))
         
         row += 1
         self.url_help_label = ttk.Label(
@@ -166,10 +227,10 @@ class ScannerGUI:
         self.url_status_label = ttk.Label(main_frame, text="", font=("Segoe UI", 8))
         self.url_status_label.grid(row=row, column=0, columnspan=3, sticky=tk.W)
         
-        # === SECTION 3: Document Library ===
+        # === SECTION 4: Document Library (Hidden in Inventory mode) ===
         row += 1
-        section_label = ttk.Label(main_frame, text="3. Document Library / Channel Name", font=("Segoe UI", 10, "bold"))
-        section_label.grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=(15, 5))
+        self.lib_section_label = ttk.Label(main_frame, text="4. Document Library / Channel Name", font=("Segoe UI", 10, "bold"))
+        self.lib_section_label.grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=(15, 5))
         
         row += 1
         self.lib_help_label = ttk.Label(
@@ -188,9 +249,9 @@ class ScannerGUI:
         self.library_entry = ttk.Entry(lib_frame, textvariable=self.library_name, width=60)
         self.library_entry.grid(row=0, column=0, sticky=(tk.W, tk.E))
         
-        # === SECTION 4: Scan Path ===
+        # === SECTION 5: Scan Path (Always visible) ===
         row += 1
-        section_label = ttk.Label(main_frame, text="4. Folder to Scan", font=("Segoe UI", 10, "bold"))
+        section_label = ttk.Label(main_frame, text="5. Folder to Scan", font=("Segoe UI", 10, "bold"))
         section_label.grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=(10, 5))
         
         row += 1
@@ -204,7 +265,7 @@ class ScannerGUI:
         
         row += 1
         path_frame = ttk.Frame(main_frame)
-        path_frame.grid(row=row, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 20))
+        path_frame.grid(row=row, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
         path_frame.columnconfigure(0, weight=1)
         
         self.path_entry = ttk.Entry(path_frame, textvariable=self.scan_path, width=50)
@@ -219,7 +280,7 @@ class ScannerGUI:
             row=row, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10
         )
         
-        # === SECTION 5: Scan Button ===
+        # === SECTION 6: Scan Button ===
         row += 1
         self.scan_button = ttk.Button(
             main_frame,
@@ -233,7 +294,7 @@ class ScannerGUI:
         style = ttk.Style()
         style.configure("Accent.TButton", font=("Segoe UI", 11, "bold"))
         
-        # === SECTION 6: Progress ===
+        # === SECTION 7: Progress ===
         row += 1
         self.progress_label = ttk.Label(main_frame, text="Status: Ready", font=("Segoe UI", 9))
         self.progress_label.grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=(5, 5))
@@ -242,7 +303,7 @@ class ScannerGUI:
         self.progress_bar = ttk.Progressbar(main_frame, mode='indeterminate', length=660)
         self.progress_bar.grid(row=row, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
         
-        # === SECTION 7: Log Output ===
+        # === SECTION 8: Log Output ===
         row += 1
         log_label = ttk.Label(main_frame, text="Scan Output:", font=("Segoe UI", 9, "bold"))
         log_label.grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=(10, 5))
@@ -258,7 +319,7 @@ class ScannerGUI:
         )
         self.log_text.grid(row=row, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
         
-        # === SECTION 8: Action Buttons ===
+        # === SECTION 9: Action Buttons ===
         row += 1
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=row, column=0, columnspan=3, sticky=(tk.W, tk.E))
@@ -330,6 +391,47 @@ class ScannerGUI:
         
         # Re-validate URL
         self.validate_url()
+    
+    def on_scan_mode_change(self):
+        """Update UI when scan mode is changed (Pre-Flight vs Inventory)."""
+        is_inventory = self.inventory_mode.get()
+        
+        if is_inventory:
+            # INVENTORY MODE: Hide SharePoint-related fields
+            self.mode_help_label.config(
+                text="📋 Inventory mode: Creates complete list of all files/folders with counts (no issue checking). SharePoint URL not required.",
+                foreground="blue"
+            )
+            # Hide destination type section
+            self.dest_section_label.grid_remove()
+            self.dest_frame.grid_remove()
+            # Hide SharePoint URL section
+            self.url_section_label.grid_remove()
+            self.url_help_label.grid_remove()
+            self.url_entry.master.grid_remove()
+            self.url_status_label.grid_remove()
+            # Hide library section
+            self.lib_section_label.grid_remove()
+            self.lib_help_label.grid_remove()
+            self.library_entry.master.grid_remove()
+        else:
+            # PRE-FLIGHT MODE: Show SharePoint-related fields
+            self.mode_help_label.config(
+                text="Pre-Flight: Validates files against SharePoint limits and naming rules • Inventory: Lists all files/folders for pre/post migration comparison",
+                foreground="gray"
+            )
+            # Show destination type section
+            self.dest_section_label.grid()
+            self.dest_frame.grid()
+            # Show SharePoint URL section
+            self.url_section_label.grid()
+            self.url_help_label.grid()
+            self.url_entry.master.grid()
+            self.url_status_label.grid()
+            # Show library section
+            self.lib_section_label.grid()
+            self.lib_help_label.grid()
+            self.library_entry.master.grid()
     
     def validate_url(self, event=None):
         """Validate SharePoint URL format in real-time."""
@@ -431,24 +533,28 @@ class ScannerGUI:
     
     def validate_inputs(self):
         """Validate all form inputs before starting scan."""
-        # Check URL
-        url = self.spo_url.get().strip()
-        if not url:
-            messagebox.showerror("Validation Error", "SharePoint URL is required.")
-            return False
+        # Check if in inventory mode (doesn't need SharePoint URL)
+        is_inventory = self.inventory_mode.get()
         
-        if self.url_status_label.cget("foreground") == "red":
-            messagebox.showerror("Validation Error", "Please fix the SharePoint URL error.")
-            return False
-        
-        # Check library (for non-OneDrive)
-        if self.dest_type.get() != "onedrive":
-            library = self.library_name.get().strip()
-            if not library:
-                messagebox.showerror("Validation Error", "Document Library name is required.")
+        if not is_inventory:
+            # Pre-Flight mode: Require SharePoint URL
+            url = self.spo_url.get().strip()
+            if not url:
+                messagebox.showerror("Validation Error", "SharePoint URL is required for Pre-Flight checks.")
                 return False
+            
+            if self.url_status_label.cget("foreground") == "red":
+                messagebox.showerror("Validation Error", "Please fix the SharePoint URL error.")
+                return False
+            
+            # Check library (for non-OneDrive)
+            if self.dest_type.get() != "onedrive":
+                library = self.library_name.get().strip()
+                if not library:
+                    messagebox.showerror("Validation Error", "Document Library name is required.")
+                    return False
         
-        # Check scan path
+        # Check scan path (required for both modes)
         path = self.scan_path.get().strip()
         if not path:
             messagebox.showerror("Validation Error", "Scan path is required.")
@@ -501,19 +607,35 @@ class ScannerGUI:
             desktop = Path.home() / "OneDrive" / "Desktop"
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.report_path = desktop / f"SPOMigrationReport_{timestamp}.csv"
-        self.log_path = desktop / f"SPOMigrationLog_{timestamp}.txt"
+        
+        # Check if inventory mode
+        if self.inventory_mode.get():
+            self.report_path = desktop / f"SPOMigrationInventory_{timestamp}.csv"
+            self.log_path = desktop / f"SPOMigrationLog_Inventory_{timestamp}.txt"
+        else:
+            self.report_path = desktop / f"SPOMigrationReport_{timestamp}.csv"
+            self.log_path = desktop / f"SPOMigrationLog_{timestamp}.txt"
         
         cmd = [
             python_exe,
             str(script_path),
             self.scan_path.get().strip(),
-            "--spo-url", self.spo_url.get().strip(),
-            "--spo-library", self.library_name.get().strip(),
-            "--report", str(self.report_path),
             "--log", str(self.log_path),
             "--progress"
         ]
+        
+        # Add SharePoint URL only if in Pre-Flight mode
+        if not self.inventory_mode.get():
+            cmd.extend([
+                "--spo-url", self.spo_url.get().strip(),
+                "--spo-library", self.library_name.get().strip()
+            ])
+        
+        # Add inventory-only flag if checked
+        if self.inventory_mode.get():
+            cmd.extend(["--inventory-only", "--inventory-report", str(self.report_path)])
+        else:
+            cmd.extend(["--report", str(self.report_path)])
         
         # Add OneDrive flag if needed
         if self.dest_type.get() == "onedrive":
@@ -570,15 +692,29 @@ class ScannerGUI:
         self.open_report_btn.config(state='normal')
         self.open_log_btn.config(state='normal')
         
+        # Check if this was an inventory scan
+        is_inventory = self.inventory_mode.get()
+        
         if exit_code is None:
             self.progress_label.config(text="Status: Scan stopped")
         elif exit_code == 0:
-            self.progress_label.config(text="Status: Scan completed - No issues found ✓")
-            self.log("Scan completed successfully. No issues found.", "SUCCESS")
-            messagebox.showinfo(
-                "Scan Complete",
-                "Scan completed successfully!\n\nNo issues found."
-            )
+            if is_inventory:
+                self.progress_label.config(text="Status: Inventory completed ✓")
+                self.log("Inventory scan completed successfully.", "SUCCESS")
+                
+                # Ask to open inventory
+                if messagebox.askyesno(
+                    "Inventory Complete",
+                    "Inventory scan completed successfully!\n\nWould you like to open the inventory report?"
+                ):
+                    self.open_report()
+            else:
+                self.progress_label.config(text="Status: Scan completed - No issues found ✓")
+                self.log("Scan completed successfully. No issues found.", "SUCCESS")
+                messagebox.showinfo(
+                    "Scan Complete",
+                    "Scan completed successfully!\n\nNo issues found."
+                )
         elif exit_code == 10:
             self.progress_label.config(text="Status: Scan completed - Issues found ⚠")
             self.log("Scan completed. Issues found - check report.", "WARNING")

@@ -843,6 +843,175 @@ class PreflightScanner:
         
         return all_issues
 
+    def generate_inventory(self, current_path: str, original_root: str = None) -> Tuple[List[dict], int, int, float]:
+        """
+        Generate a complete inventory of all files and folders (no issue checking).
+        Returns (inventory_items, file_count, folder_count, total_size_mb)
+        """
+        if original_root is None:
+            original_root = current_path
+        
+        inventory_items = []
+        file_count = 0
+        folder_count = 0
+        total_size_mb = 0.0
+        
+        try:
+            with os.scandir(current_path) as entries:
+                for entry in entries:
+                    # Skip excluded items
+                    if self.should_exclude(entry.name, entry.is_dir(follow_symlinks=False)):
+                        continue
+                    
+                    self.scan_count += 1
+                    
+                    # Progress indicator every 1,000 items
+                    if self.scan_count % 1000 == 0:
+                        self.logger.info(f"Inventoried {self.scan_count:,} items...")
+                    
+                    try:
+                        full_path = entry.path
+                        is_file = entry.is_file(follow_symlinks=False)
+                        is_dir = entry.is_dir(follow_symlinks=False)
+                        item_type = 'File' if is_file else 'Folder'
+                        
+                        # Get file extension
+                        _, ext = os.path.splitext(entry.name)
+                        
+                        # Get parent path
+                        parent_path = os.path.dirname(full_path)
+                        
+                        # Calculate depth
+                        depth = self.compute_depth(full_path, original_root)
+                        
+                        # Get file size and modified date
+                        file_size_mb = 0.0
+                        modified_date = ''
+                        
+                        if is_file:
+                            try:
+                                file_size_bytes = retry_with_backoff(os.path.getsize, full_path)
+                                file_size_mb = file_size_bytes / (1024 * 1024)
+                                total_size_mb += file_size_mb
+                                file_count += 1
+                                
+                                # Get modified timestamp
+                                mtime = os.path.getmtime(full_path)
+                                modified_date = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+                            except OSError as e:
+                                self.logger.warning(f"Could not get info for {full_path}: {e}")
+                        else:
+                            folder_count += 1
+                            try:
+                                mtime = os.path.getmtime(full_path)
+                                modified_date = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+                            except OSError:
+                                pass
+                        
+                        # Calculate SharePoint URL if configured
+                        character_count_path = len(full_path)
+                        site_url_count = len(full_path)
+                        sharepoint_url = 'N/A'
+                        
+                        if self.spo_base:
+                            try:
+                                rel_path = os.path.relpath(full_path, self.scan_root)
+                                rel_path_url = rel_path.replace('\\', '/')
+                                path_parts = [quote(part) for part in rel_path_url.split('/')]
+                                rel_path_encoded = '/'.join(path_parts)
+                                sharepoint_url = self.spo_base + rel_path_encoded
+                                site_url_count = len(sharepoint_url)
+                            except Exception as e:
+                                self.logger.warning(f"Could not compute SharePoint URL for {full_path}: {e}")
+                        
+                        # Build inventory record
+                        inventory_items.append({
+                            'ItemType': item_type,
+                            'FileName': entry.name,
+                            'Extension': ext.lower() if ext else '',
+                            'FullPath': full_path,
+                            'ParentPath': parent_path,
+                            'FileSizeMB': f'{file_size_mb:.2f}' if is_file else '',
+                            'FolderDepth': depth,
+                            'SharePointURL': sharepoint_url,
+                            'SiteURLCount': site_url_count,
+                            'CharacterCountPath': character_count_path,
+                            'ModifiedDate': modified_date
+                        })
+                        
+                        # Recurse into subdirectories
+                        if is_dir:
+                            sub_inventory, sub_files, sub_folders, sub_size = self.generate_inventory(full_path, original_root)
+                            inventory_items.extend(sub_inventory)
+                            file_count += sub_files
+                            folder_count += sub_folders
+                            total_size_mb += sub_size
+                    
+                    except PermissionError:
+                        self.logger.warning(f"Permission denied: {entry.path}")
+                    except OSError as e:
+                        self.logger.warning(f"OS error scanning {entry.path}: {e}")
+        
+        except PermissionError:
+            self.logger.error(f"Permission denied accessing directory: {current_path}")
+        except OSError as e:
+            self.logger.error(f"OS error accessing {current_path}: {e}")
+        
+        return inventory_items, file_count, folder_count, total_size_mb
+
+
+def write_inventory_csv(inventory_items: List[dict], output_path: str, logger: logging.Logger, 
+                        file_count: int, folder_count: int, total_size_mb: float):
+    """
+    Write inventory records to CSV with summary statistics.
+    """
+    if not inventory_items:
+        logger.info("No items found in inventory scan.")
+        return
+    
+    fieldnames = [
+        'ItemType',
+        'FileName',
+        'Extension',
+        'FullPath',
+        'ParentPath',
+        'FileSizeMB',
+        'FolderDepth',
+        'SharePointURL',
+        'SiteURLCount',
+        'CharacterCountPath',
+        'ModifiedDate'
+    ]
+    
+    try:
+        # Ensure output directory exists
+        output_dir = os.path.dirname(os.path.abspath(output_path))
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        
+        with open(output_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(inventory_items)
+            
+            # Write summary section
+            writer.writerow({})  # Blank row
+            writer.writerow({'ItemType': '=== INVENTORY SUMMARY ==='})
+            writer.writerow({'ItemType': 'Total Files:', 'FileName': str(file_count)})
+            writer.writerow({'ItemType': 'Total Folders:', 'FileName': str(folder_count)})
+            writer.writerow({'ItemType': 'Total Items:', 'FileName': str(file_count + folder_count)})
+            writer.writerow({'ItemType': 'Total Size (MB):', 'FileName': f'{total_size_mb:.2f}'})
+            writer.writerow({'ItemType': 'Total Size (GB):', 'FileName': f'{total_size_mb / 1024:.2f}'})
+        
+        logger.info(f"Inventory written to: {output_path}")
+        logger.info(f"Total files: {file_count:,}")
+        logger.info(f"Total folders: {folder_count:,}")
+        logger.info(f"Total size: {total_size_mb / 1024:.2f} GB")
+    
+    except OSError as e:
+        logger.error(f"Failed to write inventory to {output_path}: {e}")
+        sys.exit(3)
+
 
 def write_csv_report(issues: List[dict], output_path: str, logger: logging.Logger):
     """
@@ -1084,6 +1253,18 @@ Examples:
         help='Output path for machine-readable JSON summary'
     )
     
+    parser.add_argument(
+        '--inventory-only',
+        action='store_true',
+        help='Generate inventory CSV of all files/folders (no issue checking) for pre/post migration comparison'
+    )
+    
+    parser.add_argument(
+        '--inventory-report',
+        default='SPOMigrationInventory.csv',
+        help='Output inventory CSV report path (default: SPOMigrationInventory.csv)'
+    )
+    
     return parser.parse_args()
 
 
@@ -1149,12 +1330,18 @@ def main():
     
     logger.info(f"Report output: {args.report}")
     logger.info(f"Log output: {args.log}")
-    logger.info(f"Max path length: {args.max_path}")
-    logger.info(f"Max filename length: {args.max_filename}")
-    logger.info(f"Max file size: {args.max_file_size_gb} GB")
-    logger.info(f"Max folder depth: {args.max_depth}")
-    logger.info(f"Blocked extensions: {', '.join(args.blocked_extensions)}")
-    logger.info(f"Allow # %% & characters: {args.allow_hash_percent}")
+    
+    if args.inventory_only:
+        logger.info(f"Mode: INVENTORY ONLY (no issue checking)")
+        logger.info(f"Inventory output: {args.inventory_report}")
+    else:
+        logger.info(f"Max path length: {args.max_path}")
+        logger.info(f"Max filename length: {args.max_filename}")
+        logger.info(f"Max file size: {args.max_file_size_gb} GB")
+        logger.info(f"Max folder depth: {args.max_depth}")
+        logger.info(f"Blocked extensions: {', '.join(args.blocked_extensions)}")
+        logger.info(f"Allow # %% & characters: {args.allow_hash_percent}")
+    
     logger.info(f"Exclude directories: {len(args.exclude_dirs)} patterns")
     logger.info(f"Exclude extensions: {len(args.exclude_exts)} patterns")
     if args.workers > 1:
@@ -1195,7 +1382,29 @@ def main():
     
     # Start scan
     start_time = datetime.now()
-    logger.info("Scanning started...")
+    
+    # Handle inventory-only mode
+    if args.inventory_only:
+        logger.info("Inventory scan started...")
+        inventory_items, file_count, folder_count, total_size_mb = scanner.generate_inventory(args.scan_path)
+        
+        end_time = datetime.now()
+        duration = end_time - start_time
+        
+        # Write inventory CSV
+        write_inventory_csv(inventory_items, args.inventory_report, logger, file_count, folder_count, total_size_mb)
+        
+        logger.info("=" * 70)
+        logger.info("Inventory scan complete!")
+        logger.info(f"Duration: {duration}")
+        logger.info(f"Items scanned: {scanner.scan_count:,}")
+        logger.info(f"Inventory report: {args.inventory_report}")
+        logger.info("=" * 70)
+        
+        return
+    
+    # Standard issue-checking scan
+    logger.info("Issue scan started...")
     
     # Use streamed CSV writing
     fieldnames = [

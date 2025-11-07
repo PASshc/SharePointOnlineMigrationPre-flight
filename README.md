@@ -2,6 +2,13 @@
 
 A production-ready Python utility that recursively scans local or UNC paths to identify issues that would block or complicate SharePoint Online/OneDrive migration.
 
+## 🚀 USB Portable Version Available!
+
+**New!** Create a standalone executable package that runs on ANY Windows PC without Python or any prerequisites!
+
+👉 **For USB deployment:** Run `build_portable_exe.bat` to create a plug-and-play package  
+📖 **Full guide:** See [USB_DEPLOYMENT_GUIDE.md](USB_DEPLOYMENT_GUIDE.md)
+
 ## Features
 
 ✅ **Comprehensive Checks**
@@ -12,6 +19,13 @@ A production-ready Python utility that recursively scans local or UNC paths to i
 - File size limits (≤250 GB)
 - Leading/trailing spaces or periods
 - Folder depth analysis (>20 levels flagged)
+
+✅ **Inventory Mode** 🆕
+- Generate complete file/folder inventory for pre/post migration comparison
+- Count total files, folders, and data size
+- Export detailed CSV with metadata (modified dates, extensions, sizes)
+- Compare inventories to verify migration completeness
+- See [INVENTORY_MODE.md](INVENTORY_MODE.md) for full documentation
 
 ✅ **Production Ready**
 - Handles UNC paths and long paths
@@ -31,7 +45,10 @@ A production-ready Python utility that recursively scans local or UNC paths to i
 ### Prerequisites
 
 - **Python 3.10+** (Windows 10/11)
-- No external dependencies required (uses only Python standard library)
+- No external dependencies required for core functionality (uses only Python standard library)
+- **Optional:** Pillow (PIL) library for GUI logo display
+  - The GUI will work without Pillow, just without the logo
+  - To install: `pip install Pillow`
 
 ### Three Ways to Run the Scanner
 
@@ -40,11 +57,19 @@ A production-ready Python utility that recursively scans local or UNC paths to i
 **Double-click** `run_gui.bat` to launch the graphical interface.
 
 The GUI provides:
-- Easy form-based configuration
-- Real-time URL validation
+- **Scan mode selection as first step** (Pre-Flight Check or Inventory Only)
+- Dynamic field visibility (only show what you need)
+- Real-time URL validation (Pre-Flight mode)
 - Browse button for folder selection
 - Live scan progress
 - Auto-open report when complete
+
+**Workflow:**
+1. **Select Scan Mode**: Pre-Flight Check (validate issues) or Inventory Only (count files)
+2. **Configure fields**: SharePoint URL (if Pre-Flight mode) and folder path
+3. **Start scan**: Watch progress and review results
+
+**Note:** Inventory mode hides SharePoint URL fields - only folder path is needed!
 
 **Create Desktop Shortcut:**
 Double-click `create_desktop_shortcut.vbs` to add "SPO Scanner" icon to your desktop.
@@ -53,11 +78,11 @@ Double-click `create_desktop_shortcut.vbs` to add "SPO Scanner" icon to your des
 
 **Double-click** `run_scan.bat` to launch the command-line wizard.
 
-The wizard will guide you through:
-1. Selecting destination type (SharePoint/Teams/OneDrive)
-2. Entering SharePoint URL
-3. Entering document library name
-4. Selecting folder to scan
+**New!** The wizard now asks you to choose a scan mode first:
+1. **Pre-Flight Check** - Full validation for SharePoint migration
+2. **Inventory Only** - Create file/folder inventory (no SharePoint URL needed)
+
+Then guides you through the appropriate settings for your chosen mode.
 
 #### ⌨️ Option 3: Command Line (Advanced)
 
@@ -96,6 +121,29 @@ python .\spo_preflight.py "C:\Data" `
 python .\spo_preflight.py "\\server\share" `
   --blocked-extensions .exe .dll .bat .cmd .vbs .ps1
 ```
+
+### Inventory Mode (Pre/Post Migration Verification)
+
+**Create baseline inventory before migration:**
+```powershell
+python .\spo_preflight.py "C:\Data" --inventory-only --inventory-report "PreMigration.csv"
+```
+
+**After migration, create comparison inventory:**
+```powershell
+python .\spo_preflight.py "C:\MigratedData" --inventory-only --inventory-report "PostMigration.csv"
+```
+
+**Or use the GUI:** Check the "Inventory Only" checkbox in Section 5
+
+**Output includes:**
+- Complete list of all files and folders
+- Total file/folder counts
+- Total data size in MB/GB
+- File extensions, modified dates, paths
+- Summary statistics for easy comparison
+
+See [INVENTORY_MODE.md](INVENTORY_MODE.md) for detailed documentation and comparison workflows.
 
 ## Output Format
 
