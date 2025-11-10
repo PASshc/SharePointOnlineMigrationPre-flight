@@ -6,8 +6,14 @@ Recursively scans local or UNC paths and identifies issues that would block
 or complicate SharePoint Online/OneDrive migration.
 
 Author: 818Ninja Production Tool
+Version: 2.1.1
 License: MIT
 """
+
+# Version information
+__version__ = "2.1.1"
+__author__ = "818Ninja"
+__license__ = "MIT"
 
 import os
 import sys
@@ -1119,6 +1125,13 @@ Examples:
         """
     )
     
+    # Version flag
+    parser.add_argument(
+        '--version', '-v',
+        action='version',
+        version=f'SharePoint Online Migration Preflight Scanner v{__version__}'
+    )
+    
     parser.add_argument(
         'scan_path',
         nargs='?',
@@ -1304,7 +1317,7 @@ def main():
     logger = setup_logging(args.log)
     
     logger.info("=" * 70)
-    logger.info("SharePoint Online Migration Preflight Scanner v2.1.0")
+    logger.info(f"SharePoint Online Migration Preflight Scanner v{__version__}")
     logger.info("=" * 70)
     logger.info(f"Scan path: {args.scan_path}")
     

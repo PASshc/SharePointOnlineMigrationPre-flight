@@ -59,6 +59,9 @@ test_*.json
 test_*.txt
 final_test_*.csv
 
+# User configuration (contains local paths)
+scanner_config.json
+
 # Build artifacts
 *.exe
 *.msi

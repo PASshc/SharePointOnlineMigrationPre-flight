@@ -6,8 +6,14 @@ Graphical interface for the SPO preflight scanner with form validation,
 progress tracking, and configuration management.
 
 Author: 818Ninja Production Tool
+Version: 2.1.1
 License: MIT
 """
+
+# Version information
+__version__ = "2.1.1"
+__author__ = "818Ninja"
+__license__ = "MIT"
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
@@ -35,7 +41,7 @@ CONFIG_FILE = "scanner_config.json"
 class ScannerGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("SharePoint Migration Preflight Scanner v2.1.1")
+        self.root.title(f"SharePoint Migration Preflight Scanner v{__version__}")
         self.root.geometry("720x650")
         self.root.resizable(True, True)
         self.root.minsize(720, 500)
@@ -767,25 +773,36 @@ class ScannerGUI:
         
         try:
             config_path = Path(__file__).parent / CONFIG_FILE
-            with open(config_path, 'w') as f:
+            with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=2)
+        except PermissionError:
+            print(f"Warning: Cannot save config file ({CONFIG_FILE}). Permission denied.")
         except Exception as e:
-            print(f"Could not save config: {e}")
+            print(f"Warning: Could not save config ({CONFIG_FILE}): {e}")
     
     def load_config(self):
         """Load previous configuration from JSON file."""
         try:
             config_path = Path(__file__).parent / CONFIG_FILE
             if config_path.exists():
-                with open(config_path, 'r') as f:
+                with open(config_path, 'r', encoding='utf-8') as f:
                     config = json.load(f)
+                
+                # Validate config structure
+                if not isinstance(config, dict):
+                    print(f"Warning: Invalid config file format. Using defaults.")
+                    return
                 
                 self.dest_type.set(config.get("dest_type", "sharepoint"))
                 self.spo_url.set(config.get("spo_url", ""))
                 self.library_name.set(config.get("library_name", ""))
                 self.scan_path.set(config.get("scan_path", ""))
+        except json.JSONDecodeError as e:
+            print(f"Warning: Corrupted config file ({CONFIG_FILE}). Using defaults. Error: {e}")
+        except PermissionError:
+            print(f"Warning: Cannot read config file ({CONFIG_FILE}). Permission denied.")
         except Exception as e:
-            print(f"Could not load config: {e}")
+            print(f"Warning: Could not load config ({CONFIG_FILE}): {e}")
 
 
 def main():

@@ -50,6 +50,8 @@ A production-ready Python utility that recursively scans local or UNC paths to i
   - The GUI will work without Pillow, just without the logo
   - To install: `pip install Pillow`
 
+**📝 Note:** The GUI saves your last-used settings (SharePoint URL, library name, folder path) in `scanner_config.json` for convenience. This file is created automatically when you run the GUI and is excluded from version control (.gitignore).
+
 ### Three Ways to Run the Scanner
 
 #### 🖱️ Option 1: GUI Interface (Easiest)
